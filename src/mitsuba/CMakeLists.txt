@@ -4,7 +4,8 @@ include_directories(
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-add_executable(mitsuba-bin mitsuba.cpp)
+add_executable(mitsuba-bin mitsuba.cpp
+        mitsuba.cpp)
 
 target_link_libraries(mitsuba-bin PRIVATE mitsuba)
 

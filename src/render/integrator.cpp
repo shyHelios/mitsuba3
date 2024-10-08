@@ -1,13 +1,13 @@
 #include <mutex>
 
 #include <drjit/morton.h>
+#include <mitsuba/core/fstream.h>
 #include <mitsuba/core/fwd.h>
 #include <mitsuba/core/profiler.h>
 #include <mitsuba/core/progress.h>
 #include <mitsuba/core/spectrum.h>
 #include <mitsuba/core/timer.h>
 #include <mitsuba/core/util.h>
-#include <mitsuba/core/fstream.h>
 #include <mitsuba/render/film.h>
 #include <mitsuba/render/integrator.h>
 #include <mitsuba/render/sampler.h>
@@ -15,11 +15,13 @@
 #include <mitsuba/render/spiral.h>
 #include <nanothread/nanothread.h>
 
+#include <fstream>
+
 NAMESPACE_BEGIN(mitsuba)
 
 // -----------------------------------------------------------------------------
 
-MI_VARIANT Integrator<Float, Spectrum>::Integrator(const Properties & props)
+MI_VARIANT Integrator<Float, Spectrum>::Integrator(const Properties &props)
     : m_stop(false) {
     m_timeout = props.get<ScalarFloat>("timeout", -1.f);
 
@@ -28,24 +30,20 @@ MI_VARIANT Integrator<Float, Spectrum>::Integrator(const Properties & props)
 }
 
 MI_VARIANT typename Integrator<Float, Spectrum>::TensorXf
-Integrator<Float, Spectrum>::render(Scene *scene,
-                                    uint32_t sensor_index,
-                                    uint32_t seed,
-                                    uint32_t spp,
-                                    bool develop,
+Integrator<Float, Spectrum>::render(Scene *scene, uint32_t sensor_index,
+                                    uint32_t seed, uint32_t spp, bool develop,
                                     bool evaluate) {
     if (sensor_index >= scene->sensors().size())
-        Throw("Scene::render(): sensor index %i is out of bounds!", sensor_index);
+        Throw("Scene::render(): sensor index %i is out of bounds!",
+              sensor_index);
 
-    return render(scene, scene->sensors()[sensor_index].get(),
-                  seed, spp, develop, evaluate);
+    return render(scene, scene->sensors()[sensor_index].get(), seed, spp,
+                  develop, evaluate);
 }
 
 MI_VARIANT typename Integrator<Float, Spectrum>::TensorXf
-Integrator<Float, Spectrum>::render_forward(Scene* scene,
-                                            void* /*params*/,
-                                            Sensor *sensor,
-                                            uint32_t seed,
+Integrator<Float, Spectrum>::render_forward(Scene *scene, void * /*params*/,
+                                            Sensor *sensor, uint32_t seed,
                                             uint32_t spp) {
     auto forward_gradients = [&]() -> TensorXf {
         auto image = render(scene, sensor, seed, spp, true, false);
@@ -62,13 +60,9 @@ Integrator<Float, Spectrum>::render_forward(Scene* scene,
     }
 }
 
-MI_VARIANT void
-Integrator<Float, Spectrum>::render_backward(Scene* scene,
-                                             void* /*params */,
-                                             const TensorXf& grad_in,
-                                             Sensor* sensor,
-                                             uint32_t seed,
-                                             uint32_t spp) {
+MI_VARIANT void Integrator<Float, Spectrum>::render_backward(
+    Scene *scene, void * /*params */, const TensorXf &grad_in, Sensor *sensor,
+    uint32_t seed, uint32_t spp) {
     auto backward_gradients = [&]() -> void {
         auto image = render(scene, sensor, seed, spp, true, false);
         dr::backward_from((image * grad_in).array());
@@ -83,17 +77,17 @@ Integrator<Float, Spectrum>::render_backward(Scene* scene,
     }
 }
 
-MI_VARIANT std::vector<std::string> Integrator<Float, Spectrum>::aov_names() const {
-    return { };
+MI_VARIANT std::vector<std::string>
+Integrator<Float, Spectrum>::aov_names() const {
+    return {};
 }
 
-MI_VARIANT void Integrator<Float, Spectrum>::cancel() {
-    m_stop = true;
-}
+MI_VARIANT void Integrator<Float, Spectrum>::cancel() { m_stop = true; }
 
 // -----------------------------------------------------------------------------
 
-MI_VARIANT SamplingIntegrator<Float, Spectrum>::SamplingIntegrator(const Properties &props)
+MI_VARIANT
+SamplingIntegrator<Float, Spectrum>::SamplingIntegrator(const Properties &props)
     : Base(props) {
 
     m_block_size = props.get<uint32_t>("block_size", 0);
@@ -101,34 +95,32 @@ MI_VARIANT SamplingIntegrator<Float, Spectrum>::SamplingIntegrator(const Propert
     // If a block size is specified, ensure that it is a power of two
     uint32_t block_size = math::round_to_power_of_two(m_block_size);
     if (m_block_size > 0 && block_size != m_block_size) {
-        Log(Warn, "Setting block size from %i to next higher power of two: %i", m_block_size,
-            block_size);
+        Log(Warn, "Setting block size from %i to next higher power of two: %i",
+            m_block_size, block_size);
         m_block_size = block_size;
     }
 
     m_samples_per_pass = props.get<uint32_t>("samples_per_pass", (uint32_t) -1);
     if (m_samples_per_pass != (uint32_t) -1) {
-        Log(Warn, "The 'samples_per_pass' is deprecated, as a poor choice of "
-                  "this parameter can have a detrimental effect on performance. "
-                  "Please leave it undefined; Mitsuba will then automatically "
-                  "choose the necessary number of passes.");
+        Log(Warn,
+            "The 'samples_per_pass' is deprecated, as a poor choice of "
+            "this parameter can have a detrimental effect on performance. "
+            "Please leave it undefined; Mitsuba will then automatically "
+            "choose the necessary number of passes.");
     }
 }
 
-MI_VARIANT SamplingIntegrator<Float, Spectrum>::~SamplingIntegrator() { }
+MI_VARIANT SamplingIntegrator<Float, Spectrum>::~SamplingIntegrator() {}
 
 MI_VARIANT typename SamplingIntegrator<Float, Spectrum>::TensorXf
-SamplingIntegrator<Float, Spectrum>::render(Scene *scene,
-                                            Sensor *sensor,
-                                            uint32_t seed,
-                                            uint32_t spp,
-                                            bool develop,
-                                            bool evaluate) {
+SamplingIntegrator<Float, Spectrum>::render(Scene *scene, Sensor *sensor,
+                                            uint32_t seed, uint32_t spp,
+                                            bool develop, bool evaluate) {
     ScopedPhase sp(ProfilerPhase::Render);
     m_stop = false;
 
     // Render on a larger film if the 'high quality edges' feature is enabled
-    Film *film = sensor->film();
+    Film *film               = sensor->film();
     ScalarVector2u film_size = film->crop_size();
     if (film->sample_border())
         film_size += 2 * film->rfilter()->border_size();
@@ -140,12 +132,12 @@ SamplingIntegrator<Float, Spectrum>::render(Scene *scene,
     spp = sampler->sample_count();
 
     uint32_t spp_per_pass = (m_samples_per_pass == (uint32_t) -1)
-                                    ? spp
-                                    : std::min(m_samples_per_pass, spp);
+                                ? spp
+                                : std::min(m_samples_per_pass, spp);
 
     if ((spp % spp_per_pass) != 0)
-        Throw("sample_count (%d) must be a multiple of spp_per_pass (%d).",
-              spp, spp_per_pass);
+        Throw("sample_count (%d) must be a multiple of spp_per_pass (%d).", spp,
+              spp_per_pass);
 
     uint32_t n_passes = spp / spp_per_pass;
 
@@ -168,14 +160,15 @@ SamplingIntegrator<Float, Spectrum>::render(Scene *scene,
         if (m_timeout > 0.f)
             Log(Info, "Timeout specified: %.2f seconds.", m_timeout);
 
-        // If no block size was specified, find size that is good for parallelization
+        // If no block size was specified, find size that is good for
+        // parallelization
         uint32_t block_size = m_block_size;
         if (block_size == 0) {
             block_size = MI_BLOCK_SIZE; // 32x32
             while (true) {
                 // Ensure that there is a block for every thread
                 if (block_size == 1 || dr::prod((film_size + block_size - 1) /
-                                                 block_size) >= n_threads)
+                                                block_size) >= n_threads)
                     break;
                 block_size /= 2;
             }
@@ -185,13 +178,13 @@ SamplingIntegrator<Float, Spectrum>::render(Scene *scene,
 
         std::mutex mutex;
         ref<ProgressReporter> progress;
-        Logger* logger = mitsuba::Thread::thread()->logger();
+        Logger *logger = mitsuba::Thread::thread()->logger();
         if (logger && Info >= logger->log_level())
             progress = new ProgressReporter("Rendering");
 
         // Total number of blocks to be handled, including multiple passes.
         uint32_t total_blocks = spiral.block_count() * n_passes,
-                 blocks_done = 0;
+                 blocks_done  = 0;
 
         // Grain size for parallelization
         uint32_t grain_size = std::max(total_blocks / (4 * n_threads), 1u);
@@ -209,8 +202,7 @@ SamplingIntegrator<Float, Spectrum>::render(Scene *scene,
 
                 ref<ImageBlock> block = film->create_block(
                     ScalarVector2u(block_size) /* size */,
-                    false /* normalize */,
-                    true /* border */);
+                    false /* normalize */, true /* border */);
 
                 std::unique_ptr<Float[]> aovs(new Float[n_channels]);
 
@@ -238,8 +230,7 @@ SamplingIntegrator<Float, Spectrum>::render(Scene *scene,
                         progress->update(blocks_done / (float) total_blocks);
                     }
                 }
-            }
-        );
+            });
 
         if (develop)
             result = film->develop();
@@ -250,8 +241,8 @@ SamplingIntegrator<Float, Spectrum>::render(Scene *scene,
 
         if (wavefront_size > wavefront_size_limit) {
             spp_per_pass /=
-                (uint32_t)((wavefront_size + wavefront_size_limit - 1) /
-                           wavefront_size_limit);
+                (uint32_t) ((wavefront_size + wavefront_size_limit - 1) /
+                            wavefront_size_limit);
             n_passes       = spp / spp_per_pass;
             wavefront_size = (size_t) film_size.x() * (size_t) film_size.y() *
                              (size_t) spp_per_pass;
@@ -266,8 +257,8 @@ SamplingIntegrator<Float, Spectrum>::render(Scene *scene,
 
         dr::sync_thread(); // Separate from scene initialization (for timings)
 
-        Log(Info, "Starting render job (%ux%u, %u sample%s%s)",
-            film_size.x(), film_size.y(), spp, spp == 1 ? "" : "s",
+        Log(Info, "Starting render job (%ux%u, %u sample%s%s)", film_size.x(),
+            film_size.y(), spp, spp == 1 ? "" : "s",
             n_passes > 1 ? tfm::format(", %u passes", n_passes) : "");
 
         if (n_passes > 1 && !evaluate) {
@@ -286,7 +277,8 @@ SamplingIntegrator<Float, Spectrum>::render(Scene *scene,
         ref<ImageBlock> block = film->create_block();
         block->set_offset(film->crop_offset());
 
-        // Only use the ImageBlock coalescing feature when rendering enough samples
+        // Only use the ImageBlock coalescing feature when rendering enough
+        // samples
         block->set_coalesce(block->coalesce() && spp_per_pass >= 4);
 
         // Compute discrete sample position
@@ -359,22 +351,17 @@ SamplingIntegrator<Float, Spectrum>::render(Scene *scene,
         }
     }
 
-    if (!m_stop && (evaluate || !dr::is_jit_v<Float>))
+    if (!m_stop && (evaluate || !dr::is_jit_v<Float>) )
         Log(Info, "Rendering finished. (took %s)",
             util::time_string((float) m_render_timer.value(), true));
 
     return result;
 }
 
-MI_VARIANT void SamplingIntegrator<Float, Spectrum>::render_block(const Scene *scene,
-                                                                   const Sensor *sensor,
-                                                                   Sampler *sampler,
-                                                                   ImageBlock *block,
-                                                                   Float *aovs,
-                                                                   uint32_t sample_count,
-                                                                   uint32_t seed,
-                                                                   uint32_t block_id,
-                                                                   uint32_t block_size) const {
+MI_VARIANT void SamplingIntegrator<Float, Spectrum>::render_block(
+    const Scene *scene, const Sensor *sensor, Sampler *sampler,
+    ImageBlock *block, Float *aovs, uint32_t sample_count, uint32_t seed,
+    uint32_t block_id, uint32_t block_size) const {
 
     if constexpr (!dr::is_array_v<Float>) {
         uint32_t pixel_count = block_size * block_size;
@@ -416,20 +403,15 @@ MI_VARIANT void SamplingIntegrator<Float, Spectrum>::render_block(const Scene *s
     }
 }
 
-MI_VARIANT void
-SamplingIntegrator<Float, Spectrum>::render_sample(const Scene *scene,
-                                                   const Sensor *sensor,
-                                                   Sampler *sampler,
-                                                   ImageBlock *block,
-                                                   Float *aovs,
-                                                   const Vector2f &pos,
-                                                   ScalarFloat diff_scale_factor,
-                                                   Mask active) const {
-    const Film *film = sensor->film();
-    const bool has_alpha = has_flag(film->flags(), FilmFlags::Alpha);
+MI_VARIANT void SamplingIntegrator<Float, Spectrum>::render_sample(
+    const Scene *scene, const Sensor *sensor, Sampler *sampler,
+    ImageBlock *block, Float *aovs, const Vector2f &pos,
+    ScalarFloat diff_scale_factor, Mask active) const {
+    const Film *film      = sensor->film();
+    const bool has_alpha  = has_flag(film->flags(), FilmFlags::Alpha);
     const bool box_filter = film->rfilter()->is_box_filter();
 
-    ScalarVector2f scale = 1.f / ScalarVector2f(film->crop_size()),
+    ScalarVector2f scale  = 1.f / ScalarVector2f(film->crop_size()),
                    offset = -ScalarVector2f(film->crop_offset()) * scale;
 
     Vector2f sample_pos   = pos + sampler->next_2d(active),
@@ -455,16 +437,17 @@ SamplingIntegrator<Float, Spectrum>::render_sample(const Scene *scene,
 
     const Medium *medium = sensor->medium();
 
-    auto [spec, valid] = sample(scene, sampler, ray, medium,
+    auto [spec, valid] =
+        sample(scene, sampler, ray, medium,
                aovs + (has_alpha ? 5 : 4) /* skip R,G,B,[A],W */, active);
 
     UnpolarizedSpectrum spec_u = unpolarized_spectrum(ray_weight * spec);
 
     if (unlikely(has_flag(film->flags(), FilmFlags::Special))) {
-        film->prepare_sample(spec_u, ray.wavelengths, aovs,
-                             /*weight*/ 1.f,
-                             /*alpha */ dr::select(valid, Float(1.f), Float(0.f)),
-                             valid);
+        film->prepare_sample(
+            spec_u, ray.wavelengths, aovs,
+            /*weight*/ 1.f,
+            /*alpha */ dr::select(valid, Float(1.f), Float(0.f)), valid);
     } else {
         Color3f rgb;
         if constexpr (is_spectral_v<Spectrum>)
@@ -478,6 +461,13 @@ SamplingIntegrator<Float, Spectrum>::render_sample(const Scene *scene,
         aovs[1] = rgb.y();
         aovs[2] = rgb.z();
 
+        auto res = block->offset();
+        if (res.x() == 320 && res.y() == 64) {
+            std::ofstream os("square.txt", std::ios::app);
+            os << aovs[0] << " " << aovs[1] << " " << aovs[2] << std::endl;
+            os.close();
+        }
+
         if (likely(has_alpha)) {
             aovs[3] = dr::select(valid, Float(1.f), Float(0.f));
             aovs[4] = 1.f;
@@ -490,19 +480,19 @@ SamplingIntegrator<Float, Spectrum>::render_sample(const Scene *scene,
     block->put(box_filter ? pos : sample_pos, aovs, active);
 }
 
-MI_VARIANT std::pair<Spectrum, typename SamplingIntegrator<Float, Spectrum>::Mask>
-SamplingIntegrator<Float, Spectrum>::sample(const Scene * /* scene */,
-                                            Sampler * /* sampler */,
-                                            const RayDifferential3f & /* ray */,
-                                            const Medium * /* medium */,
-                                            Float * /* aovs */,
-                                            Mask /* active */) const {
+MI_VARIANT
+    std::pair<Spectrum, typename SamplingIntegrator<Float, Spectrum>::Mask>
+    SamplingIntegrator<Float, Spectrum>::sample(
+        const Scene * /* scene */, Sampler * /* sampler */,
+        const RayDifferential3f & /* ray */, const Medium * /* medium */,
+        Float * /* aovs */, Mask /* active */) const {
     NotImplementedError("sample");
 }
 
 // -----------------------------------------------------------------------------
 
-MI_VARIANT MonteCarloIntegrator<Float, Spectrum>::MonteCarloIntegrator(const Properties &props)
+MI_VARIANT MonteCarloIntegrator<Float, Spectrum>::MonteCarloIntegrator(
+    const Properties &props)
     : Base(props) {
     /*  Longest visualized path depth (``-1 = infinite``). A value of \c 1 will
         visualize only directly visible light sources. \c 2 will lead to
@@ -521,11 +511,12 @@ MI_VARIANT MonteCarloIntegrator<Float, Spectrum>::MonteCarloIntegrator(const Pro
     m_rr_depth = (uint32_t) rr_depth;
 }
 
-MI_VARIANT MonteCarloIntegrator<Float, Spectrum>::~MonteCarloIntegrator() { }
+MI_VARIANT MonteCarloIntegrator<Float, Spectrum>::~MonteCarloIntegrator() {}
 
 // -----------------------------------------------------------------------------
 
-MI_VARIANT AdjointIntegrator<Float, Spectrum>::AdjointIntegrator(const Properties &props)
+MI_VARIANT
+AdjointIntegrator<Float, Spectrum>::AdjointIntegrator(const Properties &props)
     : Base(props) {
 
     m_samples_per_pass = props.get<uint32_t>("samples_per_pass", (uint32_t) -1);
@@ -539,21 +530,17 @@ MI_VARIANT AdjointIntegrator<Float, Spectrum>::AdjointIntegrator(const Propertie
         Throw("\"max_depth\" must be set to -1 (infinite) or a value >= 0");
 }
 
-MI_VARIANT AdjointIntegrator<Float, Spectrum>::~AdjointIntegrator() { }
+MI_VARIANT AdjointIntegrator<Float, Spectrum>::~AdjointIntegrator() {}
 
 MI_VARIANT typename AdjointIntegrator<Float, Spectrum>::TensorXf
-AdjointIntegrator<Float, Spectrum>::render(Scene *scene,
-                                           Sensor *sensor,
-                                           uint32_t seed,
-                                           uint32_t spp,
-                                           bool develop,
-                                           bool evaluate) {
+AdjointIntegrator<Float, Spectrum>::render(Scene *scene, Sensor *sensor,
+                                           uint32_t seed, uint32_t spp,
+                                           bool develop, bool evaluate) {
     ScopedPhase sp(ProfilerPhase::Render);
     m_stop = false;
 
-    Film *film = sensor->film();
-    ScalarVector2u film_size = film->size(),
-                   crop_size = film->crop_size();
+    Film *film               = sensor->film();
+    ScalarVector2u film_size = film->size(), crop_size = film->crop_size();
 
     // Potentially adjust the number of samples per pixel if spp != 0
     Sampler *sampler = sensor->sampler();
@@ -582,7 +569,8 @@ AdjointIntegrator<Float, Spectrum>::render(Scene *scene,
 
     // Special case: no emitters present in the scene.
     if (unlikely(scene->emitters().empty())) {
-        Log(Info, "Rendering finished (no emitters found, returning black image).");
+        Log(Info,
+            "Rendering finished (no emitters found, returning black image).");
         TensorXf result;
         if (develop) {
             result = film->develop();
@@ -633,8 +621,7 @@ AdjointIntegrator<Float, Spectrum>::render(Scene *scene,
                 ref<Sampler> sampler = sensor->sampler()->clone();
 
                 ref<ImageBlock> block = film->create_block(
-                    ScalarVector2u(0) /* use crop size */,
-                    true /* normalize */,
+                    ScalarVector2u(0) /* use crop size */, true /* normalize */,
                     false /* border */);
 
                 block->set_offset(film->crop_offset());
@@ -646,7 +633,8 @@ AdjointIntegrator<Float, Spectrum>::render(Scene *scene,
                               (uint32_t) range.begin() / (uint32_t) grain_size);
 
                 size_t ctr = 0;
-                for (auto i = range.begin(); i != range.end() && !should_stop(); ++i) {
+                for (auto i = range.begin(); i != range.end() && !should_stop();
+                     ++i) {
                     sample(scene, sensor, sampler, block, sample_scale);
                     sampler->advance();
 
@@ -655,7 +643,8 @@ AdjointIntegrator<Float, Spectrum>::render(Scene *scene,
                         std::lock_guard<std::mutex> lock(mutex);
                         samples_done += ctr;
                         ctr = 0;
-                        progress->update(samples_done / (ScalarFloat) total_samples);
+                        progress->update(samples_done /
+                                         (ScalarFloat) total_samples);
                     }
                 }
                 total_samples += ctr;
@@ -663,11 +652,11 @@ AdjointIntegrator<Float, Spectrum>::render(Scene *scene,
                 // When all samples are done for this range, commit to the film
                 /* locked */ {
                     std::lock_guard<std::mutex> lock(mutex);
-                    progress->update(samples_done / (ScalarFloat) total_samples);
+                    progress->update(samples_done /
+                                     (ScalarFloat) total_samples);
                     film->put_block(block);
                 }
-            }
-        );
+            });
 
         if (develop)
             result = film->develop();
@@ -681,9 +670,9 @@ AdjointIntegrator<Float, Spectrum>::render(Scene *scene,
         constexpr size_t wavefront_size_limit = 0xffffffffu;
         if (samples_per_pass > wavefront_size_limit) {
             spp_per_pass /=
-                (uint32_t)((samples_per_pass + wavefront_size_limit - 1) /
-                           wavefront_size_limit);
-            n_passes = spp / spp_per_pass;
+                (uint32_t) ((samples_per_pass + wavefront_size_limit - 1) /
+                            wavefront_size_limit);
+            n_passes         = spp / spp_per_pass;
             samples_per_pass = (size_t) film_size.x() * (size_t) film_size.y() *
                                (size_t) spp_per_pass;
 
@@ -695,8 +684,8 @@ AdjointIntegrator<Float, Spectrum>::render(Scene *scene,
                 samples_per_pass, n_passes);
         }
 
-        Log(Info, "Starting render job (%ux%u, %u sample%s%s)",
-            crop_size.x(), crop_size.y(), spp, spp == 1 ? "" : "s",
+        Log(Info, "Starting render job (%ux%u, %u sample%s%s)", crop_size.x(),
+            crop_size.y(), spp, spp == 1 ? "" : "s",
             n_passes > 1 ? tfm::format(", %u passes", n_passes) : "");
 
         // Inform the sampler about the passes (needed in vectorized modes)
@@ -705,10 +694,9 @@ AdjointIntegrator<Float, Spectrum>::render(Scene *scene,
         // Seed the underlying random number generators, if applicable
         sampler->seed(seed, (uint32_t) samples_per_pass);
 
-        ref<ImageBlock> block = film->create_block(
-            ScalarVector2u(0) /* use crop size */,
-            true /* normalize */,
-            false /* border */);
+        ref<ImageBlock> block =
+            film->create_block(ScalarVector2u(0) /* use crop size */,
+                               true /* normalize */, false /* border */);
 
         block->set_offset(film->crop_offset());
 
@@ -753,7 +741,7 @@ AdjointIntegrator<Float, Spectrum>::render(Scene *scene,
         }
     }
 
-    if (!m_stop && (evaluate || !dr::is_jit_v<Float>))
+    if (!m_stop && (evaluate || !dr::is_jit_v<Float>) )
         Log(Info, "Rendering finished. (took %s)",
             util::time_string((float) m_render_timer.value(), true));
 

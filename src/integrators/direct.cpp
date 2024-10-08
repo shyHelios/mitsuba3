@@ -1,7 +1,9 @@
-#include <mitsuba/render/integrator.h>
+#include <mitsuba/core/properties.h>
 #include <mitsuba/render/bsdf.h>
 #include <mitsuba/render/emitter.h>
-#include <mitsuba/core/properties.h>
+#include <mitsuba/render/integrator.h>
+
+#include <fstream>
 
 NAMESPACE_BEGIN(mitsuba)
 
@@ -16,20 +18,20 @@ Direct illumination integrator (:monosp:`direct`)
 
  * - shading_samples
    - |int|
-   - This convenience parameter can be used to set both :code:`emitter_samples` and
-     :code:`bsdf_samples` at the same time.
+   - This convenience parameter can be used to set both :code:`emitter_samples`
+and :code:`bsdf_samples` at the same time.
 
  * - emitter_samples
    - |int|
-   - Optional more fine-grained parameter: specifies the number of samples that should be generated
-     using the direct illumination strategies implemented by the scene's emitters.
-     (Default: set to the value of :monosp:`shading_samples`)
+   - Optional more fine-grained parameter: specifies the number of samples that
+should be generated using the direct illumination strategies implemented by the
+scene's emitters. (Default: set to the value of :monosp:`shading_samples`)
 
  * - bsdf_samples
    - |int|
-   - Optional more fine-grained parameter: specifies the number of samples that should be generated
-     using the BSDF sampling strategies implemented by the scene's surfaces.
-     (Default: set to the value of :monosp:`shading_samples`)
+   - Optional more fine-grained parameter: specifies the number of samples that
+should be generated using the BSDF sampling strategies implemented by the
+scene's surfaces. (Default: set to the value of :monosp:`shading_samples`)
 
  * - hide_emitters
    - |bool|
@@ -37,15 +39,15 @@ Direct illumination integrator (:monosp:`direct`)
      (Default: no, i.e. |false|)
 
 .. subfigstart::
-.. subfigure:: ../../resources/data/docs/images/render/integrator_direct_bsdf.jpg
-   :caption: (**a**) BSDF sampling only
-   :label: fig-direct-bsdf
+.. subfigure::
+../../resources/data/docs/images/render/integrator_direct_bsdf.jpg :caption:
+(**a**) BSDF sampling only :label: fig-direct-bsdf
 .. subfigure:: ../../resources/data/docs/images/render/integrator_direct_lum.jpg
    :caption: (**b**) Emitter sampling only
    :label: fig-direct-lum
-.. subfigure:: ../../resources/data/docs/images/render/integrator_direct_both.jpg
-   :caption: (**c**) MIS between both sampling strategies
-   :label: fig-direct-both
+.. subfigure::
+../../resources/data/docs/images/render/integrator_direct_both.jpg :caption:
+(**c**) MIS between both sampling strategies :label: fig-direct-both
 .. subfigend::
    :width: 0.32
    :label: fig-direct
@@ -63,7 +65,8 @@ The number of samples spent on either technique is configurable, hence
 it is also possible to turn this plugin into an emitter sampling-only
 or BSDF sampling-only integrator.
 
-.. note:: This integrator does not handle participating media or indirect illumination.
+.. note:: This integrator does not handle participating media or indirect
+illumination.
 
 .. tabs::
     .. code-tab::  xml
@@ -84,9 +87,9 @@ public:
     MI_IMPORT_TYPES(Scene, Sampler, Medium, Emitter, EmitterPtr, BSDF, BSDFPtr)
 
     DirectIntegrator(const Properties &props) : Base(props) {
-        if (props.has_property("shading_samples")
-            && (props.has_property("emitter_samples") ||
-                props.has_property("bsdf_samples"))) {
+        if (props.has_property("shading_samples") &&
+            (props.has_property("emitter_samples") ||
+             props.has_property("bsdf_samples"))) {
             Throw("Cannot specify both 'shading_samples' and"
                   " ('emitter_samples' and/or 'bsdf_samples').");
         }
@@ -96,7 +99,8 @@ public:
         size_t shading_samples = props.get<size_t>("shading_samples", 1);
 
         /// Number of samples to take using the emitter sampling technique
-        m_emitter_samples = props.get<size_t>("emitter_samples", shading_samples);
+        m_emitter_samples =
+            props.get<size_t>("emitter_samples", shading_samples);
 
         /// Number of samples to take using the BSDF sampling technique
         m_bsdf_samples = props.get<size_t>("bsdf_samples", shading_samples);
@@ -111,8 +115,7 @@ public:
         m_frac_lum    = m_emitter_samples / (ScalarFloat) sum;
     }
 
-    std::pair<Spectrum, Mask> sample(const Scene *scene,
-                                     Sampler *sampler,
+    std::pair<Spectrum, Mask> sample(const Scene *scene, Sampler *sampler,
                                      const RayDifferential3f &ray,
                                      const Medium * /* medium */,
                                      Float * /* aovs */,
@@ -140,8 +143,8 @@ public:
         // ----------------------- Emitter sampling -----------------------
 
         BSDFContext ctx;
-        BSDFPtr bsdf = si.bsdf(ray);
-        auto flags = bsdf->flags();
+        BSDFPtr bsdf        = si.bsdf(ray);
+        auto flags          = bsdf->flags();
         Mask sample_emitter = active && has_flag(flags, BSDFFlags::Smooth);
 
         if (dr::any_or<true>(sample_emitter)) {
@@ -160,11 +163,14 @@ public:
 
                 /* Determine BSDF value and probability of having sampled
                    that same direction using BSDF sampling. */
-                auto [bsdf_val, bsdf_pdf] = bsdf->eval_pdf(ctx, si, wo, active_e);
+                auto [bsdf_val, bsdf_pdf] =
+                    bsdf->eval_pdf(ctx, si, wo, active_e);
                 bsdf_val = si.to_world_mueller(bsdf_val, -wo, si.wi);
 
-                Float mis = dr::select(ds.delta, Float(1.f), mis_weight(
-                    ds.pdf * m_frac_lum, bsdf_pdf * m_frac_bsdf) * m_weight_lum);
+                Float mis = dr::select(
+                    ds.delta, Float(1.f),
+                    mis_weight(ds.pdf * m_frac_lum, bsdf_pdf * m_frac_bsdf) *
+                        m_weight_lum);
                 result[active_e] += mis * bsdf_val * emitter_val;
             }
         }
@@ -172,15 +178,18 @@ public:
         // ------------------------ BSDF sampling -------------------------
 
         for (size_t i = 0; i < m_bsdf_samples; ++i) {
-            auto [bs, bsdf_val] = bsdf->sample(ctx, si, sampler->next_1d(active),
-                                               sampler->next_2d(active), active);
+            Point2f sample2 = sampler->next_2d(active);
+            auto [bs, bsdf_val] = bsdf->sample(
+                ctx, si, sampler->next_1d(active), sample2, active);
             bsdf_val = si.to_world_mueller(bsdf_val, -bs.wo, si.wi);
 
-            Mask active_b = active && dr::any(dr::neq(unpolarized_spectrum(bsdf_val), 0.f));
+            Mask active_b =
+                active && dr::any(dr::neq(unpolarized_spectrum(bsdf_val), 0.f));
 
-            // Trace the ray in the sampled direction and intersect against the scene
-            SurfaceInteraction3f si_bsdf =
-                scene->ray_intersect(si.spawn_ray(si.to_world(bs.wo)), active_b);
+            // Trace the ray in the sampled direction and intersect against the
+            // scene
+            SurfaceInteraction3f si_bsdf = scene->ray_intersect(
+                si.spawn_ray(si.to_world(bs.wo)), active_b);
 
             // Retain only rays that hit an emitter
             EmitterPtr emitter = si_bsdf.emitter(scene, active_b);
@@ -194,8 +203,8 @@ public:
                    direction using Emitter sampling. */
                 DirectionSample3f ds(scene, si_bsdf, si);
 
-                Float emitter_pdf =
-                    dr::select(delta, 0.f, scene->pdf_emitter_direction(si, ds, active_b));
+                Float emitter_pdf = dr::select(
+                    delta, 0.f, scene->pdf_emitter_direction(si, ds, active_b));
 
                 result[active_b] +=
                     bsdf_val * emitter_val *

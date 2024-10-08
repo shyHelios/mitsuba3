@@ -24,4 +24,7 @@ add_plugin(pplastic             pplastic.cpp)
 add_plugin(principled           principled.cpp)
 add_plugin(principledthin       principledthin.cpp)
 
+# micrograin材质
+add_plugin(micrograin micrograin.cpp)
+
 set(MI_PLUGIN_TARGETS "${MI_PLUGIN_TARGETS}" PARENT_SCOPE)
